@@ -942,6 +942,7 @@ _handle_terminate(int fd, stepd_step_rec_t *step, uid_t uid)
 		verbose("Sent SIGKILL signal to %ps", &step->step_id);
 	}
 	slurm_mutex_unlock(&suspend_mutex);
+	step_terminate_monitor_stop();
 
 done:
 	/* Send the return code and errnum */
