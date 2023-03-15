@@ -92,6 +92,8 @@ struct client_io {
 
 	struct step_launch_state *sls; /* Used to notify the main thread of an
 				       I/O problem.  */
+	pthread_cond_t io_cond;         /* I/O thread state conditional */
+	pthread_mutex_t io_mutex;       /* I/O thread state mutex */
 };
 
 typedef struct client_io client_io_t;
