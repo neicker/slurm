@@ -1913,6 +1913,8 @@ spank_err_t spank_get_item(spank_t spank, spank_item_t item, ...)
 	char ***p2argv;
 	char **p2str;
 	char **p2vers;
+	uint32_t **p3uint32;
+	char ****p3argv;
 	stepd_step_task_info_t *task;
 	stepd_step_rec_t  *slurmd_job = NULL;
 	struct spank_launcher_job_info *launcher_job = NULL;
@@ -2208,6 +2210,16 @@ spank_err_t spank_get_item(spank_t spank, spank_item_t item, ...)
 		p2vers = va_arg(vargs, char  **);
 		*p2vers = SLURM_MICRO;
 		break;
+	case S_TASK_ARGV:
+		p3uint32 = va_arg(vargs, uint32_t **);
+		p3argv = va_arg(vargs, char ****);
+		if (spank->task) {
+			*p3uint32 = &(spank->task->argc);
+			*p3argv = &(spank->task->argv);
+		} else {
+			*p3uint32 = NULL;
+			*p3argv = NULL;
+		}
 	default:
 		rc = ESPANK_BAD_ARG;
 		break;

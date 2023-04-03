@@ -165,6 +165,9 @@ enum spank_item {
     S_SLURM_RESTART_COUNT,   /* Job restart count (uint32_t *)               */
     S_JOB_ARRAY_ID,          /* Slurm job array id (uint32_t *) or 0         */
     S_JOB_ARRAY_TASK_ID,     /* Slurm job array task id (uint32_t *)         */
+
+    S_TASK_ARGV,             /* (Modifiable) argv of executable to be
+			      * started (int **, char ****)                  */
 };
 
 typedef enum spank_item spank_item_t;
@@ -315,7 +318,8 @@ spank_err_t spank_option_getopt (spank_t spank, struct spank_option *opt,
  *   Refer to the spank_item_t comments for argument types.
  *   For S_JOB_ARGV, S_JOB_ENV, and S_SLURM_VERSION* items
  *   the result returned to the caller should not be freed or
- *   modified.
+ *   modified. For S_TASK_ARGV items the result might be modified
+ *   and will influence the task to be execve()ed
  *
  *  Returns ESPANK_SUCCESS on success, ESPANK_NOTASK if an S_TASK*
  *   item is requested from outside a task context, ESPANK_BAD_ARG
