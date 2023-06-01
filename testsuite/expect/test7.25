@@ -1,0 +1,253 @@
+#!/usr/bin/env expect
+############################################################################
+# Purpose: Test of Slurm functionality
+#          Test of SPANK plugin and spank_prepend_task_argv()
+############################################################################
+# Copyright (C) 2023 Forschungszentrum Juelich GmbH
+# Written by Norbert Eicker <n.eicker@fz-juelich.de
+#
+# This file is part of Slurm, a resource management program.
+# For details, see <https://slurm.schedmd.com/>.
+# Please also read the included file: DISCLAIMER.
+#
+# Slurm is free software; you can redistribute it and/or modify it under
+# the terms of the GNU General Public License as published by the Free
+# Software Foundation; either version 2 of the License, or (at your option)
+# any later version.
+#
+# Slurm is distributed in the hope that it will be useful, but WITHOUT ANY
+# WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+# FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
+# details.
+#
+# You should have received a copy of the GNU General Public License along
+# with Slurm; if not, write to the Free Software Foundation, Inc.,
+# 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
+############################################################################
+source ./globals
+
+set cwd             "[$bin_pwd]"
+set file_plugin     "$cwd/$test_name.prog"
+set file_run        "$test_dir/runscript"
+set file_batch      "$test_dir/batchscript"
+set file_out        "$test_dir/output"
+set orig_spank_conf "$test_dir/orig_conf"
+set new_spank_conf  "$test_dir/new_conf"
+set job_id          0
+
+if {![is_super_user]} {
+	skip "This test must be run as SlurmUser"
+}
+if {[get_config_param "FrontendName"] ne "MISSING"} {
+	skip "This test is incompatible with front-end systems"
+}
+
+set config_dir [get_conf_path]
+set spank_conf_file ${config_dir}/plugstack.conf
+
+regexp {^(\d+\.\d+)} [get_config_param SLURM_VERSION] - ctld_slurm_ver
+regexp {slurm (\d+\.\d+)} [run_command_output -fail "$scontrol -V"] - loc_slurm_ver
+if {$ctld_slurm_ver ne $loc_slurm_ver} {
+	skip "Slurmctld ($ctld_slurm_ver) and local Slurm ($loc_slurm_ver) versions are not the same, can not continue"
+}
+
+proc cleanup {} {
+	global job_id orig_spank_conf spank_conf_file
+	global bin_cp bin_rm file_plugin test_status STATUS_FAIL
+
+	cancel_job $job_id
+
+	#
+	# Restore the original plugstack
+	#
+	if {[file exists $orig_spank_conf]} {
+		exec $bin_cp -f $orig_spank_conf $spank_conf_file
+	} else {
+		exec $bin_rm -f $spank_conf_file
+	}
+	reconfigure
+
+	file delete ${file_plugin}.so
+
+	if {$test_status == $STATUS_FAIL} {
+		log_warn "Check for matching checksums on the plugstack.conf file. Different checksums could indicate file system delays"
+	}
+}
+
+#
+# Build the plugin
+#
+exec $bin_cc -fPIC -shared -I${slurm_dir}/include -o ${file_plugin}.so ${file_plugin}.c
+
+if {[file exists $spank_conf_file]} {
+	spawn $bin_cat $spank_conf_file
+	expect {
+		-re "test${test_id}" {
+			fail "Spank plugin includes vestigial test${test_id}. You probably should manually remove it from $spank_conf_file. It was probably left over from some previous test failure"
+		}
+		eof {
+			wait
+		}
+	}
+
+	exec $bin_cp -f $spank_conf_file $orig_spank_conf
+	exec $bin_cp -f $spank_conf_file $new_spank_conf
+} else {
+	exec $bin_cp -f /dev/null $new_spank_conf
+}
+
+exec $bin_echo "required ${file_plugin}.so" >>$new_spank_conf
+spawn $bin_cp -f $new_spank_conf $spank_conf_file
+expect {
+	-re "Permission denied" {
+		skip "User lacks permission to update plugstack_conf file"
+	}
+	eof {
+		wait
+	}
+}
+reconfigure -fail
+
+#
+# Test of srun help message
+#
+# NOTE: Expect parsing failures have been noted running "$srun --help"
+#       directly, so we build a script containing a pipe to tail
+#
+log_info "Testing srun help message........."
+
+make_bash_script $file_run "$srun --help | $bin_grep test"
+set matches 0
+spawn $file_run
+expect {
+	-- "--test_suite=\\\[enable_priv\\\]" {
+		incr matches
+		exp_continue
+	}
+	-re "Component of slurm test suite" {
+		incr matches
+		exp_continue
+	}
+	timeout {
+		fail "srun not responding"
+	}
+	eof {
+		wait
+	}
+}
+subtest {$matches == 2} "Plugin help message in srun help message" "not found"
+
+
+#
+# Test the actual spank_prepend_task_argv functionality
+#
+log_info "Testing spank_prepend_task_argv........."
+
+make_bash_script $file_run "
+\[ -z \$TASK_INIT \] || echo TASK_INIT
+\[ -z \$TASK_PRIV \] || echo TASK_PRIV
+echo IT_RAN
+"
+
+#
+# First test in spank_task_init
+#
+make_bash_script $file_batch "
+    $srun --test_suite -n1 $file_run
+"
+
+set job_id [submit_job -fail "-W -N1 -t1 -o $file_out $file_batch"]
+
+set matches 0
+spawn $bin_cat $file_out
+expect {
+	-re "error" {
+		fail "Some error happened"
+	}
+	-re "TASK_INIT" {
+		incr matches
+		exp_continue
+	}
+	-re "TASK_PRIV" {
+		incr matches
+		exp_continue
+	}
+	-re "IT_RAN" {
+		incr matches
+		exp_continue
+	}
+	eof {
+		wait
+	}
+}
+subtest {$matches == 2} "Remote (slurmd) spank_task_init check" "failure ($matches != 2)"
+
+exec $bin_rm -f $file_out
+
+#
+# Now test in spank_task_init_privileged
+#
+make_bash_script $file_batch "
+    $srun --test_suite=1 -n1 $file_run
+"
+
+set job_id [submit_job -fail "-W -N1 -t1 -o $file_out $file_batch"]
+
+set matches 0
+spawn $bin_cat $file_out
+expect {
+	-re "error" {
+		fail "Some error happened"
+	}
+	-re "TASK_INIT" {
+		incr matches
+		exp_continue
+	}
+	-re "TASK_PRIV" {
+		incr matches
+		exp_continue
+	}
+	-re "IT_RAN" {
+		incr matches
+		exp_continue
+	}
+	eof {
+		wait
+	}
+}
+subtest {$matches == 3} "Remote (slurmd) spank_task_init_privileged check" "failure ($matches != 3)"
+
+exec $bin_rm -f $file_out
+
+#
+# Finally test without option
+#
+make_bash_script $file_batch "
+    $srun -n1 $file_run
+"
+
+set job_id [submit_job -fail "-W -N1 -t1 -o $file_out $file_batch"]
+
+set matches 0
+spawn $bin_cat $file_out
+expect {
+	-re "error" {
+		fail "Some error happened"
+	}
+	-re "TASK_INIT" {
+		incr matches
+		exp_continue
+	}
+	-re "TASK_PRIV" {
+		incr matches
+		exp_continue
+	}
+	-re "IT_RAN" {
+		incr matches
+		exp_continue
+	}
+	eof {
+		wait
+	}
+}
+subtest {$matches == 1} "Disabled (slurmd) spank_task_init check" "failure ($matches != 1)"
