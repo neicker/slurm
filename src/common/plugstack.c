@@ -2422,10 +2422,7 @@ spank_err_t spank_prepend_task_argv (spank_t spank, const unsigned int argc,
 		return (ESPANK_NOT_TASK);
 
 	new_argc = argc + spank->task->argc;
-	new_argv = xmalloc((new_argc+1) * sizeof(char *));
-
-	if (!new_argv)
-		return (ESPANK_NOSPACE);
+	new_argv = xcalloc((new_argc+1), sizeof(char *));
 
 	for (i = 0; i < argc && argv[i]; i++) {
 		new_argv[j++] = xstrdup(argv[i]);
@@ -2433,9 +2430,6 @@ spank_err_t spank_prepend_task_argv (spank_t spank, const unsigned int argc,
 	for (i = 0; i < spank->task->argc && spank->task->argv[i]; i++) {
 		new_argv[j++] = spank->task->argv[i];
 	}
-	new_argv[j] = NULL;
-
-	free(spank->task->argv);
 
 	spank->task->argc = new_argc;
 	spank->task->argv = new_argv;
