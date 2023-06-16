@@ -406,8 +406,7 @@ spank_err_t spank_job_control_unsetenv (spank_t sp, const char *name);
  *    ESPANK_BAD_ARG   = spank handle invalid or argv is NULL.
  *    ESPANK_NOT_TASK  = called from outside a task context.
  */
-spank_err_t spank_prepend_task_argv (spank_t spank, const unsigned int argc,
-	const char *argv[]);
+spank_err_t spank_prepend_task_argv(spank_t spank, int argc, const char *argv[]);
 
 /*
  *  Slurm logging functions which are exported to plugins.
